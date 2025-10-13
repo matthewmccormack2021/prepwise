@@ -70,26 +70,32 @@ async def chat(request: ChatRequest):
             elif "current_tool_use" in kwargs and kwargs["current_tool_use"].get("name"):
                 captured_output.append(f"\n[Using tool: {kwargs['current_tool_use']['name']}]\n")
         
-        # Create orchestrator with callback handler
-        from app.agents.orchestrator import ollama_model, MAIN_SYSTEM_PROMPT
-        from app.agents.specialized_agents import introduction_assistant, behavioral_question_assistant, technical_question_assistant
-        from strands import Agent
-        
-        orchestrator_with_callback = Agent(
-            model=ollama_model,
-            system_prompt=MAIN_SYSTEM_PROMPT,
-            callback_handler=capture_callback,
-            tools=[introduction_assistant, behavioral_question_assistant, technical_question_assistant]
-        )
-        
         # Call the agent - callback will capture output
-        result = orchestrator_with_callback(request.query)
+        result = orchestrator(request.query)
         
         # Return captured output if available, otherwise fallback to result
         if captured_output:
             full_response = "".join(captured_output)
         else:
-            full_response = str(result.message) if hasattr(result, 'message') else str(result)
+            # Properly extract message content from Strands Agent result
+            if hasattr(result, 'message'):
+                if hasattr(result.message, 'content'):
+                    # Handle different content formats
+                    content = result.message.content
+                    if isinstance(content, list) and len(content) > 0:
+                        # Extract text from content list
+                        if hasattr(content[0], 'text'):
+                            full_response = content[0].text
+                        else:
+                            full_response = str(content[0])
+                    elif isinstance(content, str):
+                        full_response = content
+                    else:
+                        full_response = str(content)
+                else:
+                    full_response = str(result.message)
+            else:
+                full_response = str(result)
         
         # Return the complete agent response along with metadata
         return {
