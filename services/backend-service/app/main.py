@@ -9,9 +9,13 @@ import uvicorn
 from loguru import logger
 
 from app.agents.orchestrator import orchestrator
+from app.services.web_scraper import scrape_job_posting
 
 class ChatRequest(BaseModel):
     query: str
+
+class ScrapeRequest(BaseModel):
+    url: str
 
 # Configure logging
 logger.remove()
@@ -114,6 +118,43 @@ async def chat(request: ChatRequest):
             "query": request.query,
             "error": str(e),
             "message": "Failed to process chat request. Please ensure Ollama server is running on localhost:11434"
+        }
+
+@app.post("/scrape-job")
+async def scrape_job(request: ScrapeRequest):
+    """Scrape job information from a job posting URL."""
+    try:
+        logger.info(f"Scraping job posting from URL: {request.url}")
+        
+        # Scrape the job posting
+        job_info = scrape_job_posting(request.url)
+        
+        if 'error' in job_info:
+            return {
+                "status": "error",
+                "service": "backend",
+                "timestamp": datetime.now().isoformat(),
+                "url": request.url,
+                "error": job_info['error']
+            }
+        
+        return {
+            "status": "success",
+            "service": "backend",
+            "timestamp": datetime.now().isoformat(),
+            "url": request.url,
+            "job_info": job_info
+        }
+        
+    except Exception as e:
+        logger.error(f"Error in scrape-job endpoint: {str(e)}")
+        return {
+            "status": "error",
+            "service": "backend", 
+            "timestamp": datetime.now().isoformat(),
+            "url": request.url,
+            "error": str(e),
+            "message": "Failed to scrape job posting"
         }
 
 if __name__ == "__main__":

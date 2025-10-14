@@ -10,6 +10,7 @@ st.set_page_config(page_title="Chat + Transcribe", page_icon="🎧", layout="cen
 # ----------------------------
 TRANSCRIBE_API_URL = "http://transcription-service:9000/asr"
 LLM_API_URL = "http://backend-service:8002/chat"
+SCRAPE_API_URL = "http://backend-service:8002/scrape-job"
 
 # ----------------------------
 # APP TITLE
@@ -35,6 +36,8 @@ if "position_description" not in st.session_state:
     st.session_state.position_description = None
 if "show_position_modal" not in st.session_state:
     st.session_state.show_position_modal = True
+if "position_company" not in st.session_state:
+    st.session_state.position_company = None
 
 # ----------------------------
 # POSITION SELECTION MODAL
@@ -50,6 +53,36 @@ def show_position_modal():
                 <p style="font-size: 16px; color: #666;">Please provide details about the position you'd like to interview for:</p>
             </div>
             """, unsafe_allow_html=True)
+            
+            # URL scraping section
+            st.markdown("**🌐 Or scrape from a job posting URL:**")
+            job_url = st.text_input(
+                "Job Posting URL",
+                placeholder="Paste the URL of a job posting (LinkedIn, Indeed, etc.)",
+                help="Enter a job posting URL to automatically extract the position details"
+            )
+            
+            col_url1, col_url2 = st.columns([3, 1])
+            with col_url2:
+                if st.button("🔍 Scrape", use_container_width=True, disabled=not job_url.strip()):
+                    if job_url.strip():
+                        with st.spinner("Scraping job posting..."):
+                            scraped_data = scrape_job_posting(job_url.strip())
+                            
+                        if 'error' in scraped_data:
+                            st.error(f"❌ Failed to scrape: {scraped_data['error']}")
+                        else:
+                            # Auto-fill the form with scraped data
+                            if scraped_data.get('title'):
+                                st.session_state.position_name = scraped_data['title']
+                            if scraped_data.get('description'):
+                                st.session_state.position_description = scraped_data['description']
+                            if scraped_data.get('company'):
+                                st.session_state.position_company = scraped_data['company']
+                            st.success("✅ Successfully scraped job posting!")
+                            st.rerun()
+            
+            st.markdown("---")
             
             # Quick position selection
             st.markdown("**Quick Select:**")
@@ -143,6 +176,23 @@ def transcribe_audio(audio_bytes: bytes):
         return None
 
 
+def scrape_job_posting(url: str):
+    """Scrape job information from a URL"""
+    try:
+        payload = {"url": url}
+        res = requests.post(SCRAPE_API_URL, json=payload, timeout=30)
+        
+        if res.status_code == 200:
+            data = res.json()
+            if data.get("status") == "success":
+                return data.get("job_info", {})
+            else:
+                return {"error": data.get("error", "Unknown error")}
+        else:
+            return {"error": f"HTTP {res.status_code}: {res.text}"}
+    except Exception as e:
+        return {"error": f"Connection error: {str(e)}"}
+
 def send_to_llm(message_text: str):
     """Send a message or transcription to the LLM backend"""
     if not message_text or st.session_state.processing_message:
@@ -161,6 +211,8 @@ def send_to_llm(message_text: str):
                 position_context = ""
                 if st.session_state.position_name:
                     position_context = f"Interview Position: {st.session_state.position_name}"
+                    if st.session_state.position_company:
+                        position_context += f"\nCompany: {st.session_state.position_company}"
                     if st.session_state.position_description:
                         position_context += f"\nPosition Description: {st.session_state.position_description}"
                     position_context += "\n\n"
@@ -202,7 +254,11 @@ def send_to_llm(message_text: str):
 # ----------------------------
 if st.session_state.position_name:
     st.sidebar.header("🎯 Current Position")
-    st.sidebar.info(f"**{st.session_state.position_name}**")
+    position_display = f"**{st.session_state.position_name}**"
+    if st.session_state.position_company:
+        position_display += f"\n*{st.session_state.position_company}*"
+    st.sidebar.info(position_display)
+    
     if st.session_state.position_description:
         with st.sidebar.expander("Position Details"):
             st.text(st.session_state.position_description[:200] + "..." if len(st.session_state.position_description) > 200 else st.session_state.position_description)

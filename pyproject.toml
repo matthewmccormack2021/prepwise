@@ -27,6 +27,7 @@ fastapi = "^0"
 uvicorn = "^0.24.0"
 strands-agents = {extras = ["ollama"], version = "^1.0.0"}
 strands-agents-tools = "^0.2.0"
+html2text = ">=2025.4.15"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
