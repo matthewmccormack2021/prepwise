@@ -272,37 +272,6 @@ if st.session_state.position_name:
     
     st.sidebar.markdown("---")
 
-st.sidebar.header("🎙️ Record Your Answer")
-
-audio_data = mic_recorder(
-    start_prompt="🎤 Start Recording",
-    stop_prompt="⏹️ Stop Recording",
-    just_once=False,
-    key="recorder",
-)
-
-if audio_data and audio_data.get("bytes"):
-    st.session_state.audio_recording = audio_data["bytes"]
-    st.sidebar.audio(audio_data["bytes"], format="audio/webm")
-
-    if st.sidebar.button("Transcribe Recording"):
-        with st.spinner("Transcribing..."):
-            transcription = transcribe_audio(audio_data["bytes"])
-            if transcription:
-                st.session_state.transcribed_text = transcription
-                st.sidebar.success("✅ Transcription complete!")
-            else:
-                st.sidebar.error("❌ Transcription failed. Please try again.")
-
-# Show transcribed text if available
-if st.session_state.transcribed_text:
-    st.sidebar.text_area(
-        "Transcribed Text", st.session_state.transcribed_text, height=150
-    )
-    if st.sidebar.button("Send Transcription to Chat"):
-        st.session_state.pending_message = st.session_state.transcribed_text
-        st.session_state.transcribed_text = None  # clear after sending
-        st.rerun()
 
 # ----------------------------
 # MAIN CHAT INTERFACE
@@ -330,8 +299,61 @@ if st.session_state.pending_message:
     send_to_llm(st.session_state.pending_message)
     st.session_state.pending_message = None
 
-# Text chat input
-user_input = st.chat_input("Type your answer or follow-up question here...")
+# Voice-only interface with microphone controls
+st.markdown("---")
+st.markdown("""
+<div style="text-align: center; padding: 20px; background-color: #f0f2f6; border-radius: 10px; margin: 20px 0;">
+    <h4 style="color: #1f77b4; margin-bottom: 15px;">🎤 Voice-Only Interview</h4>
+    <p style="font-size: 14px; color: #666; margin-bottom: 20px;">Record your responses using the microphone below</p>
+</div>
+""", unsafe_allow_html=True)
 
-if user_input:
-    send_to_llm(user_input)
+# Microphone controls
+col1, col2, col3 = st.columns([1, 2, 1])
+
+with col2:
+    audio_data = mic_recorder(
+        start_prompt="🎤 Start Recording",
+        stop_prompt="⏹️ Stop Recording",
+        just_once=False,
+        key="recorder",
+    )
+
+# Show audio player and transcription controls below microphone
+if audio_data and audio_data.get("bytes"):
+    st.session_state.audio_recording = audio_data["bytes"]
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.audio(audio_data["bytes"], format="audio/webm")
+
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("🎯 Transcribe Recording", use_container_width=True):
+            with st.spinner("Transcribing..."):
+                transcription = transcribe_audio(audio_data["bytes"])
+                if transcription:
+                    st.session_state.transcribed_text = transcription
+                    st.success("✅ Transcription complete!")
+                else:
+                    st.error("❌ Transcription failed. Please try again.")
+
+# Show transcribed text and send button
+if st.session_state.transcribed_text:
+    st.markdown("### 📝 Your Transcribed Response")
+    
+    col1, col2, col3 = st.columns([1, 2, 1])
+    with col2:
+        st.text_area(
+            "Transcribed Text", 
+            st.session_state.transcribed_text, 
+            height=150,
+            disabled=True
+        )
+    
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col2:
+        if st.button("📤 Send Response", type="primary", use_container_width=True):
+            st.session_state.pending_message = st.session_state.transcribed_text
+            st.session_state.transcribed_text = None  # clear after sending
+            st.rerun()
