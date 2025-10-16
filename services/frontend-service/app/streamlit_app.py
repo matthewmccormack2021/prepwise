@@ -38,6 +38,8 @@ if "show_position_modal" not in st.session_state:
     st.session_state.show_position_modal = True
 if "position_company" not in st.session_state:
     st.session_state.position_company = None
+if "session_id" not in st.session_state:
+    st.session_state.session_id = None
 
 # ----------------------------
 # POSITION SELECTION MODAL
@@ -194,7 +196,7 @@ def scrape_job_posting(url: str):
         return {"error": f"Connection error: {str(e)}"}
 
 def send_to_llm(message_text: str):
-    """Send a message or transcription to the LLM backend"""
+    """Send a message or transcription to the LLM backend with session management"""
     if not message_text or st.session_state.processing_message:
         return
 
@@ -216,25 +218,26 @@ def send_to_llm(message_text: str):
                     if st.session_state.position_description:
                         position_context += f"\nPosition Description: {st.session_state.position_description}"
                     position_context += "\n\n"
+
+                contextual_query = f"{position_context}{message_text}"
+
+                # Prepare payload with session management
+                payload = {
+                    "query": contextual_query
+                }
+                # Only include session_id if it exists
+                if st.session_state.session_id:
+                    payload["session_id"] = st.session_state.session_id
                 
-                context = ""
-                for msg in st.session_state.messages[:-1]:
-                    role = "Interviewer" if msg["role"] == "assistant" else "Candidate"
-                    context += f"{role}: {msg['content']}\n"
-
-                contextual_query = (
-                    f"{position_context}Previous conversation:\n{context}\n\nCurrent question: {message_text}"
-                    if context
-                    else f"{position_context}{message_text}"
-                )
-
-                payload = {"query": contextual_query}
                 res = requests.post(LLM_API_URL, json=payload, timeout=120)
 
                 if res.status_code == 200:
                     data = res.json()
                     if data.get("status") == "success":
                         reply = data.get("response", "No response received")
+                        # Store session ID for future requests
+                        if data.get("session_id"):
+                            st.session_state.session_id = data["session_id"]
                     else:
                         reply = f"Error: {data.get('error', 'Unknown error')}"
                 else:

@@ -12,13 +12,14 @@ from .specialized_agents import (
 )
 
 @tool
-def behavioral_workflow(user_input: str) -> str:
+def behavioral_workflow(user_input: str, session_id: str = "default") -> str:
     """
     Execute the complete behavioral interview workflow using a graph-based approach.
     This tool coordinates the behavioral question generation and evaluation process.
 
     Args:
         user_input: The user's input or response to process through the behavioral workflow
+        session_id: Session ID for conversation persistence
 
     Returns:
         A comprehensive result from the behavioral interview workflow
@@ -27,9 +28,15 @@ def behavioral_workflow(user_input: str) -> str:
         # Build the behavioral workflow graph
         builder = GraphBuilder()
         
-        # Add nodes using agent factories
-        builder.add_node(behavioral_question_generator, "behavioral_question")
-        builder.add_node(behavioral_question_evaluator, "behavioral_evaluation")
+        # Add nodes using agent factories with session context
+        builder.add_node(
+            lambda x: behavioral_question_generator(x, session_id), 
+            "behavioral_question"
+        )
+        builder.add_node(
+            lambda x: behavioral_question_evaluator(x, session_id), 
+            "behavioral_evaluation"
+        )
         
         # Add edges (dependencies)
         builder.add_edge("behavioral_question", "behavioral_evaluation")
@@ -54,13 +61,14 @@ def behavioral_workflow(user_input: str) -> str:
         return f"Error in behavioral workflow: {str(e)}"
 
 @tool
-def technical_workflow(user_input: str) -> str:
+def technical_workflow(user_input: str, session_id: str = "default") -> str:
     """
     Execute the complete technical interview workflow using a graph-based approach.
     This tool coordinates the technical question generation and evaluation process.
 
     Args:
         user_input: The user's input or response to process through the technical workflow
+        session_id: Session ID for conversation persistence
 
     Returns:
         A comprehensive result from the technical interview workflow
@@ -69,9 +77,15 @@ def technical_workflow(user_input: str) -> str:
         # Build the technical workflow graph
         builder = GraphBuilder()
         
-        # Add nodes using agent factories
-        builder.add_node(technical_question_generator, "technical_question")
-        builder.add_node(technical_question_evaluator, "technical_evaluation")
+        # Add nodes using agent factories with session context
+        builder.add_node(
+            lambda x: technical_question_generator(x, session_id), 
+            "technical_question"
+        )
+        builder.add_node(
+            lambda x: technical_question_evaluator(x, session_id), 
+            "technical_evaluation"
+        )
         
         # Add edges (dependencies)
         builder.add_edge("technical_question", "technical_evaluation")

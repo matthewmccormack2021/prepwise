@@ -1,26 +1,31 @@
 """FastAPI backend service for PrepWise agentic system."""
 
 import os
+import uuid
 from datetime import datetime
-from fastapi import FastAPI
+from typing import Optional
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 from loguru import logger
 
-from app.agents.orchestrator import orchestrator
+from app.agents.orchestrator import create_orchestrator
 from app.services.web_scraper import scrape_job_posting
+from app.models.response_models import ChatResponse, JobScrapeResponse, HealthResponse
+from app.config import config
 
 class ChatRequest(BaseModel):
     query: str
+    session_id: Optional[str] = None  # Optional session ID for conversation persistence
 
 class ScrapeRequest(BaseModel):
     url: str
 
 # Configure logging
 logger.remove()
-logger.add("logs/backend.log", rotation="1 day", retention="7 days", level="INFO")
-logger.add(lambda msg: print(msg, end=""), level="INFO")
+logger.add("logs/backend.log", rotation=config.LOG_ROTATION, retention=config.LOG_RETENTION, level=config.LOG_LEVEL)
+logger.add(lambda msg: print(msg, end=""), level=config.LOG_LEVEL)
 
 app = FastAPI(
     title="PrepWise Backend Service",
@@ -31,7 +36,7 @@ app = FastAPI(
 # Add CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # Configure appropriately for production
+    allow_origins=config.CORS_ORIGINS,  # Configure appropriately for production
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -52,75 +57,70 @@ async def root():
         }
     }
 
-@app.get("/health")
+@app.get("/health", response_model=HealthResponse)
 async def health_check():
     """Health check endpoint."""
-    return {
-        "status": "healthy",
-        "service": "backend",
-        "timestamp": datetime.now().isoformat()
-    }
+    return HealthResponse(
+        status="healthy",
+        service="backend",
+        version="1.0.0"
+    )
 
-@app.post("/chat")
+@app.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    """Chat endpoint with the agent using callback handler to capture all output."""
+    """Chat endpoint with proper session management and structured responses."""
     try:
-        # Use callback handler to capture all agent output including reasoning and tool usage
-        captured_output = []
+        # Generate session ID if not provided
+        session_id = request.session_id or f"session_{uuid.uuid4().hex[:8]}"
         
-        def capture_callback(**kwargs):
-            if "data" in kwargs:
-                captured_output.append(kwargs["data"])
-            elif "current_tool_use" in kwargs and kwargs["current_tool_use"].get("name"):
-                captured_output.append(f"\n[Using tool: {kwargs['current_tool_use']['name']}]\n")
+        # Create orchestrator with session management
+        orchestrator_agent = create_orchestrator(session_id)
         
-        # Call the agent - callback will capture output
-        result = orchestrator(request.query)
+        # Process the query
+        result = orchestrator_agent(request.query)
         
-        # Return captured output if available, otherwise fallback to result
-        if captured_output:
-            full_response = "".join(captured_output)
+        # Extract response content - handle different result formats
+        if hasattr(result, 'message') and hasattr(result.message, 'content'):
+            response_content = result.message.content
+        elif hasattr(result, 'content'):
+            response_content = result.content
+        elif isinstance(result, dict) and 'content' in result:
+            response_content = result['content']
+        elif isinstance(result, str):
+            response_content = result
         else:
-            # Properly extract message content from Strands Agent result
-            if hasattr(result, 'message'):
-                if hasattr(result.message, 'content'):
-                    # Handle different content formats
-                    content = result.message.content
-                    if isinstance(content, list) and len(content) > 0:
-                        # Extract text from content list
-                        if hasattr(content[0], 'text'):
-                            full_response = content[0].text
-                        else:
-                            full_response = str(content[0])
-                    elif isinstance(content, str):
-                        full_response = content
-                    else:
-                        full_response = str(content)
-                else:
-                    full_response = str(result.message)
-            else:
-                full_response = str(result)
+            # Fallback: convert result to string
+            response_content = str(result)
         
-        # Return the complete agent response along with metadata
-        return {
-            "status": "success",
-            "service": "backend",
-            "timestamp": datetime.now().isoformat(),
-            "query": request.query,
-            "response": full_response
-        }
+        # Get conversation length for metadata (optional)
+        conversation_length = None
+        
+        return ChatResponse(
+            status="success",
+            query=request.query,
+            response=response_content,
+            session_id=session_id,
+            conversation_length=conversation_length,
+            metadata={
+                "model": config.get_ollama_model(),
+                "timestamp": datetime.now().isoformat()
+            }
+        )
+        
     except Exception as e:
         logger.error(f"Error in chat endpoint: {str(e)}")
-        return {
-            "status": "error",
-            "service": "backend", 
-            "timestamp": datetime.now().isoformat(),
-            "query": request.query,
-            "error": str(e),
-            "message": "Failed to process chat request. Please ensure Ollama server is running on localhost:11434"
-        }
+        return ChatResponse(
+            status="error",
+            query=request.query,
+            response="",
+            error=str(e),
+            metadata={
+                "error_type": type(e).__name__,
+                "timestamp": datetime.now().isoformat()
+            }
+        )
 
-@app.post("/scrape-job")
+@app.post("/scrape-job", response_model=JobScrapeResponse)
 async def scrape_job(request: ScrapeRequest):
     """Scrape job information from a job posting URL."""
     try:
@@ -130,32 +130,25 @@ async def scrape_job(request: ScrapeRequest):
         job_info = scrape_job_posting(request.url)
         
         if 'error' in job_info:
-            return {
-                "status": "error",
-                "service": "backend",
-                "timestamp": datetime.now().isoformat(),
-                "url": request.url,
-                "error": job_info['error']
-            }
+            return JobScrapeResponse(
+                status="error",
+                url=request.url,
+                error=job_info['error']
+            )
         
-        return {
-            "status": "success",
-            "service": "backend",
-            "timestamp": datetime.now().isoformat(),
-            "url": request.url,
-            "job_info": job_info
-        }
+        return JobScrapeResponse(
+            status="success",
+            url=request.url,
+            job_info=job_info
+        )
         
     except Exception as e:
         logger.error(f"Error in scrape-job endpoint: {str(e)}")
-        return {
-            "status": "error",
-            "service": "backend", 
-            "timestamp": datetime.now().isoformat(),
-            "url": request.url,
-            "error": str(e),
-            "message": "Failed to scrape job posting"
-        }
+        return JobScrapeResponse(
+            status="error",
+            url=request.url,
+            error=str(e)
+        )
 
 if __name__ == "__main__":
     # Create logs directory if it doesn't exist
@@ -164,8 +157,8 @@ if __name__ == "__main__":
     # Run the application
     uvicorn.run(
         "main:app",
-        host="0.0.0.0",
-        port=8002,
+        host=config.API_HOST,
+        port=config.API_PORT,
         reload=True,
-        log_level="info"
+        log_level=config.LOG_LEVEL.lower()
     )
