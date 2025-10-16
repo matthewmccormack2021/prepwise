@@ -1,31 +1,68 @@
+"""
+Main orchestrator agent for coordinating interview workflows.
+"""
+
 import os
+import uuid
 from strands import Agent
 from strands.models.ollama import OllamaModel
-from .specialized_agents import introduction_assistant, behavioral_question_assistant, technical_question_assistant
+from .session_manager import SessionService, AgentFactory
+from .workflow_tools import behavioral_workflow, technical_workflow
+from .specialized_agents import introduction_assistant, behavioral_question_generator, technical_question_generator
+from ..config import config
 
-# Get Ollama host from environment variable, default to host.docker.internal for Docker
-ollama_host = os.getenv("OLLAMA_HOST", "http://host.docker.internal:11434")
-
-# Create an Ollama model instance
+# Create an Ollama model instance using config
 ollama_model = OllamaModel(
-    host=ollama_host,  # Ollama server address
-    model_id="llama3.2"               # Specify which model to use
+    host=config.get_ollama_host(),  # Ollama server address
+    model_id=config.get_ollama_model()  # Specify which model to use
 )
+
+# Initialize session service and agent factory
+session_service = SessionService()
+agent_factory = AgentFactory(ollama_model, session_service)
 
 # Define the orchestrator system prompt with clear tool selection guidance
 MAIN_SYSTEM_PROMPT = """
-You are an interviewer that uses specialized agents to conduct an interview:
+You are an experienced interviewer that uses specialized agents and workflows to conduct comprehensive interviews:
 - For starting the interview and general introduction → Use the introduction_assistant tool
-- For generating a behavioral question (or assessing the answer) → Use the behavioral_question_assistant tool
-- For generating a technical question (or assessing the answer) → Use the technical_question_assistant tool
+- For behavioral questions and evaluations → Use the behavioral_workflow tool
+- For technical questions and evaluations → Use the technical_workflow tool
 - For simple questions not requiring specialized knowledge → Answer directly
 
-Always select the most appropriate tool based on the user's query.
+When a user answers a question, provide thoughtful feedback and respond with another question that builds naturally from their answer. Always maintain conversation flow and context.
+
+Always select the most appropriate tool based on the user's query and interview progress.
 """
 
-# Strands Agents SDK allows easy integration of agent tools
-orchestrator = Agent(model=ollama_model,
-    system_prompt=MAIN_SYSTEM_PROMPT,
-    callback_handler=None,  # Disable default callback to capture streaming ourselves
-    tools=[introduction_assistant, behavioral_question_assistant, technical_question_assistant]
-)
+
+def create_orchestrator(session_id: str = None) -> Agent:
+    """
+    Create an orchestrator agent with proper session management.
+    
+    Args:
+        session_id: Optional session ID for conversation persistence
+        
+    Returns:
+        Configured Agent instance
+    """
+    if session_id is None:
+        session_id = f"session_{uuid.uuid4().hex[:8]}"
+    
+    session_manager = session_service.get_session_manager(session_id)
+    conversation_manager = session_service.get_conversation_manager()
+    
+    return Agent(
+        model=ollama_model,
+        system_prompt=MAIN_SYSTEM_PROMPT,
+        session_manager=session_manager,
+        conversation_manager=conversation_manager,
+        tools=[
+            introduction_assistant, 
+            behavioral_question_generator, 
+            technical_question_generator
+        ]
+    )
+
+
+# Create default orchestrator for backward compatibility
+orchestrator = create_orchestrator()
