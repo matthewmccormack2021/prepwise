@@ -8,7 +8,7 @@ from strands import Agent
 from strands.models.ollama import OllamaModel
 from .session_manager import SessionService, AgentFactory
 from .workflow_tools import behavioral_workflow, technical_workflow
-from .specialized_agents import introduction_assistant
+from .specialized_agents import introduction_assistant, behavioral_question_generator, technical_question_generator
 from ..config import config
 
 # Create an Ollama model instance using config
@@ -58,8 +58,8 @@ def create_orchestrator(session_id: str = None) -> Agent:
         conversation_manager=conversation_manager,
         tools=[
             introduction_assistant, 
-            behavioral_workflow, 
-            technical_workflow
+            behavioral_question_generator, 
+            technical_question_generator
         ]
     )
 
